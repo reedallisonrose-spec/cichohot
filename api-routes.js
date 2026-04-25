@@ -48,6 +48,54 @@ const __dirname = path.dirname(__filename);
 
 const router = express.Router();
 
+function getProvidedAdminToken(req) {
+  const headerToken = (req.headers['x-admin-token'] || '').toString().trim();
+  if (headerToken) return headerToken;
+  const auth = (req.headers.authorization || '').toString().trim();
+  if (auth.toLowerCase().startsWith('bearer ')) {
+    return auth.slice(7).trim();
+  }
+  return '';
+}
+
+function requireAdminToken(req, res, next) {
+  const expectedToken = (process.env.ADMIN_API_TOKEN || '').trim();
+  // Backward-compatible: only enforce when token exists in env.
+  if (!expectedToken) return next();
+  const provided = getProvidedAdminToken(req);
+  if (!provided || provided !== expectedToken) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  return next();
+}
+
+function sanitizeSiteConfigForPublic(config) {
+  const safeConfig = { ...(config || {}) };
+
+  // Never expose server-side secrets to public clients.
+  delete safeConfig.stripe_secret_key;
+  delete safeConfig.who_api_key;
+  if (safeConfig.email && typeof safeConfig.email === 'object') {
+    safeConfig.email = {
+      ...safeConfig.email,
+      pass: ''
+    };
+  }
+
+  const wasabi = safeConfig.wasabi_config;
+  if (wasabi && typeof wasabi === 'object') {
+    safeConfig.wasabi_config = {
+      ...wasabi,
+      accessKey: '',
+      secretKey: '',
+      access_key: '',
+      secret_key: ''
+    };
+  }
+
+  return safeConfig;
+}
+
 // Configurar multer para upload de arquivos
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -248,7 +296,7 @@ router.get('/videos/:id', async (req, res) => {
 });
 
 // POST /api/videos - Criar novo vídeo
-router.post('/videos', async (req, res) => {
+router.post('/videos', requireAdminToken, async (req, res) => {
   try {
     if (!requireSupabase(res)) return;
     const newVideo = req.body;
@@ -286,7 +334,7 @@ router.post('/videos', async (req, res) => {
 });
 
 // PUT /api/videos/:id - Atualizar vídeo
-router.put('/videos/:id', async (req, res) => {
+router.put('/videos/:id', requireAdminToken, async (req, res) => {
   try {
     if (!requireSupabase(res)) return;
     const updates = req.body;
@@ -337,7 +385,7 @@ router.put('/videos/:id', async (req, res) => {
 });
 
 // DELETE /api/videos/:id - Deletar vídeo
-router.delete('/videos/:id', async (req, res) => {
+router.delete('/videos/:id', requireAdminToken, async (req, res) => {
   try {
     if (!requireSupabase(res)) return;
     const { error } = await supabase.from('videos').delete().eq('id', req.params.id);
@@ -380,7 +428,7 @@ router.post('/videos/:id/views', async (req, res) => {
 // ===== USUÁRIOS =====
 
 // GET /api/users - Obter todos os usuários
-router.get('/users', async (req, res) => {
+router.get('/users', requireAdminToken, async (req, res) => {
   try {
     if (!requireSupabase(res)) return;
     const { data: users, error } = await supabase.from('users').select('id,email,name,role,created_at').order('created_at', { ascending: false });
@@ -416,7 +464,7 @@ router.get('/users/email/:email', async (req, res) => {
 });
 
 // GET /api/users/:id - Obter usuário por ID (DEVE vir depois de /users/email/:email)
-router.get('/users/:id', async (req, res) => {
+router.get('/users/:id', requireAdminToken, async (req, res) => {
   try {
     if (!requireSupabase(res)) return;
     const { data: user, error } = await supabase.from('users').select('*').eq('id', req.params.id).maybeSingle();
@@ -434,7 +482,7 @@ router.get('/users/:id', async (req, res) => {
 });
 
 // POST /api/users - Criar novo usuário
-router.post('/users', async (req, res) => {
+router.post('/users', requireAdminToken, async (req, res) => {
   try {
     if (!requireSupabase(res)) return;
     const { email, name, role = 'admin', password_hash } = req.body;
@@ -448,7 +496,7 @@ router.post('/users', async (req, res) => {
 });
 
 // PUT /api/users/:id - Atualizar usuário
-router.put('/users/:id', async (req, res) => {
+router.put('/users/:id', requireAdminToken, async (req, res) => {
   try {
     if (!requireSupabase(res)) return;
     const updates = req.body;
@@ -472,7 +520,7 @@ router.put('/users/:id', async (req, res) => {
 });
 
 // DELETE /api/users/:id - Deletar usuário
-router.delete('/users/:id', async (req, res) => {
+router.delete('/users/:id', requireAdminToken, async (req, res) => {
   try {
     if (!requireSupabase(res)) return;
     const { error } = await supabase.from('users').delete().eq('id', req.params.id);
@@ -581,7 +629,7 @@ router.get('/test', (req, res) => {
 });
 
 // Limpar cache do frontend
-router.post('/clear-cache', (req, res) => {
+router.post('/clear-cache', requireAdminToken, (req, res) => {
   try {
     // console.log('Cache clear requested');
     res.json({ 
@@ -684,7 +732,7 @@ router.get('/site-config', async (req, res) => {
         ...Object.fromEntries(Object.entries(envWasabi).filter(([_, v]) => v))
       }
     };
-    res.json(merged);
+    res.json(sanitizeSiteConfigForPublic(merged));
   } catch (error) {
     console.error('Error fetching site config:', error);
     res.status(500).json({ error: 'Failed to fetch site config' });
@@ -692,7 +740,7 @@ router.get('/site-config', async (req, res) => {
 });
 
 // PUT /api/site-config - Atualizar configurações do site
-router.put('/site-config', async (req, res) => {
+router.put('/site-config', requireAdminToken, async (req, res) => {
   try {
     if (!requireSupabase(res)) return;
     const payload = { ...req.body } || {};
@@ -1321,7 +1369,7 @@ router.get('/paypal-checkout', async (req, res) => {
 });
 
 // Deletar arquivo do Wasabi
-router.delete('/delete-file/:fileId', async (req, res) => {
+router.delete('/delete-file/:fileId', requireAdminToken, async (req, res) => {
   // console.log('Delete file endpoint called with fileId:', req.params.fileId);
   try {
     const { fileId } = req.params;
@@ -1380,7 +1428,7 @@ router.delete('/delete-file/:fileId', async (req, res) => {
 // Removido - usando Wasabi diretamente como fonte principal
 
 // Verificar status do backup
-router.get('/backup/status', async (req, res) => {
+router.get('/backup/status', requireAdminToken, async (req, res) => {
   try {
     const wasabiConfig = await getWasabiConfigFromServer();
 
@@ -1432,7 +1480,7 @@ router.get('/backup/status', async (req, res) => {
 });
 
 // Upload de metadados para Wasabi
-router.post('/upload/metadata', upload.single('file'), async (req, res) => {
+router.post('/upload/metadata', requireAdminToken, upload.single('file'), async (req, res) => {
   // console.log('Metadata upload endpoint called');
   try {
     if (!req.file) {
@@ -1481,7 +1529,7 @@ router.post('/upload/metadata', upload.single('file'), async (req, res) => {
 });
 
 // Upload de arquivo para Wasabi
-router.post('/upload/:folder', upload.single('file'), async (req, res) => {
+router.post('/upload/:folder', requireAdminToken, upload.single('file'), async (req, res) => {
   // console.log(`Upload endpoint called: /upload/${req.params.folder}`);
   try {
     const { folder } = req.params; // 'videos' ou 'thumbnails'
@@ -1547,5 +1595,6 @@ router.post('/upload/:folder', upload.single('file'), async (req, res) => {
     });
   }
 });
+
 
 export default router;

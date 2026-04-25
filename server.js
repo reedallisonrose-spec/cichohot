@@ -15,27 +15,28 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const CORS_ALLOWED_ORIGINS = (process.env.CORS_ALLOWED_ORIGINS || '')
+  .split(',')
+  .map(v => v.trim())
+  .filter(Boolean);
+
+function isAllowedOrigin(origin) {
+  if (!origin) return true;
+  if (process.env.NODE_ENV !== 'production') {
+    return origin.includes('localhost') || origin.includes('127.0.0.1');
+  }
+  if (CORS_ALLOWED_ORIGINS.length === 0) {
+    // Backward-compatible fallback; set CORS_ALLOWED_ORIGINS in production to lock this down.
+    return true;
+  }
+  return CORS_ALLOWED_ORIGINS.includes(origin);
+}
 
 // Middleware
 app.use(cors({
   origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl requests)
-    if (!origin) return callback(null, true);
-    
-    // In development, allow localhost
-    if (process.env.NODE_ENV !== 'production') {
-      if (origin.includes('localhost') || origin.includes('127.0.0.1')) {
-        return callback(null, true);
-      }
-    }
-    
-    // In production, allow ALL domains - completamente aberto
-    if (process.env.NODE_ENV === 'production') {
-      return callback(null, true);
-    }
-    
-    // For any other case, allow the request
-    callback(null, true);
+    if (isAllowedOrigin(origin)) return callback(null, true);
+    return callback(new Error('Not allowed by CORS'));
   },
   credentials: true
 }));

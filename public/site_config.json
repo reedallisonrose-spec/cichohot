@@ -13,8 +13,8 @@
   "emailPass": "",
   "emailFrom": "",
   "wasabiConfig": {
-    "accessKey": "03AFIL7RED0GENX84KDT",
-    "secretKey": "XMrGmC2R25GRTASbUssLkjz5Zr8UsfeyZ9zVgbGy",
+    "accessKey": "",
+    "secretKey": "",
     "region": "eu-central-2",
     "bucket": "videosfolder",
     "endpoint": "https://s3.eu-central-2.wasabisys.com"

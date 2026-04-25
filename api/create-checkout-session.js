@@ -1,11 +1,34 @@
 // Serverless function for creating PayJSR checkout sessions
 import { createClient } from '@supabase/supabase-js';
 
+function isAllowedOrigin(origin) {
+  const list = (process.env.CORS_ALLOWED_ORIGINS || '')
+    .split(',')
+    .map(v => v.trim())
+    .filter(Boolean);
+  if (!origin) return true;
+  if (process.env.NODE_ENV !== 'production') return true;
+  if (list.length === 0) return true; // Backward-compatible until env is configured.
+  return list.includes(origin);
+}
+
+function isSafeHttpUrl(value) {
+  try {
+    const parsed = new URL(String(value || ''));
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:';
+  } catch {
+    return false;
+  }
+}
+
 export default async function handler(req, res) {
-  // Add CORS headers for Vercel
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  // Add configurable CORS headers for Vercel
+  const origin = req.headers.origin;
+  if (isAllowedOrigin(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin || '*');
+  }
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-admin-token');
   
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
@@ -13,6 +36,9 @@ export default async function handler(req, res) {
   
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
+  }
+  if (!isAllowedOrigin(origin)) {
+    return res.status(403).json({ error: 'Origin not allowed' });
   }
 
   try {
@@ -45,6 +71,9 @@ export default async function handler(req, res) {
     
     if (!amount || !success_url || !cancel_url) {
       return res.status(400).json({ error: 'Missing required parameters' });
+    }
+    if (!isSafeHttpUrl(success_url) || !isSafeHttpUrl(cancel_url)) {
+      return res.status(400).json({ error: 'Invalid success_url or cancel_url' });
     }
 
     // Create a random product name from a list
